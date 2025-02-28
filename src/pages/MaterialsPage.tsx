@@ -1,14 +1,15 @@
 import React, { useState, useEffect } from 'react';
-import { Search, Upload, FileText, Download, Filter } from 'lucide-react';
+import { Search, Upload, FileText, FileImage, Download, Filter } from 'lucide-react';
 import { supabase } from '../lib/supabase'; // Клієнт Supabase
 
 interface Material {
   id: string;
-  name: string;
+  title: string;
   type: string;
   subject: string;
   uploadedBy: string;
   uploadDate: string;
+  downloads: number;
   fileSize: string;
   url: string;
 }
@@ -33,14 +34,15 @@ const MaterialsPage = () => {
       const fetchedMaterials = await Promise.all(
         data.map(async (file) => {
           const { data: urlData } = supabase.storage.from('materials').getPublicUrl(file.name);
-          const type = file.name.endsWith('.pdf') ? 'pdf' : file.name.endsWith('.docx') ? 'docx' : 'unknown';
+          const type = file.name.endsWith('.pdf') ? 'pdf' : file.name.endsWith('.docx') ? 'docx' : file.name.endsWith('.jpg') || file.name.endsWith('.png') ? 'image' : 'unknown';
           return {
             id: file.id || file.name,
-            name: file.name,
+            title: file.name,
             type,
-            subject: file.metadata?.subject || 'Без предмету', // Додаємо метадані
+            subject: file.metadata?.subject || 'Без предмету',
             uploadedBy: file.metadata?.uploadedBy || 'Анонім',
             uploadDate: new Date(file.created_at).toLocaleDateString('uk-UA'),
+            downloads: file.metadata?.downloads || 0,
             fileSize: `${(file.metadata?.size / 1024 / 1024).toFixed(1)} MB`,
             url: urlData.publicUrl,
           };
@@ -54,15 +56,15 @@ const MaterialsPage = () => {
   // Фільтрація матеріалів
   const filteredMaterials = materials.filter((material) => {
     const matchesSearch =
-      material.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      material.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
       material.subject.toLowerCase().includes(searchTerm.toLowerCase());
     const matchesSubject = selectedSubject === '' || material.subject === selectedSubject;
     const matchesType = selectedType === '' || material.type === selectedType;
     return matchesSearch && matchesSubject && matchesType;
   });
 
-  const subjects = [...new Set(materials.map((m) => m.subject))];
-  const fileTypes = [...new Set(materials.map((m) => m.type))];
+  const subjects = [...new Set(materials.map((material) => material.subject))];
+  const fileTypes = [...new Set(materials.map((material) => material.type))];
 
   // Завантаження файлу
   const handleFileUpload = async () => {
@@ -72,26 +74,27 @@ const MaterialsPage = () => {
     }
 
     const { error } = await supabase.storage.from('materials').upload(file.name, file, {
-      upsert: true, // Перезаписувати, якщо файл із такою назвою вже є
+      upsert: true,
       contentType: file.type,
-      metadata: { subject: subjectInput, uploadedBy: 'Користувач' }, // Додаємо метадані
+      metadata: { subject: subjectInput, uploadedBy: 'Користувач', downloads: 0 },
     });
 
     if (error) {
       console.error('Upload error:', error);
-      alert('Помилка завантаження файлу!');
+      alert(`Помилка завантаження: ${error.message}`);
     } else {
       const { data } = supabase.storage.from('materials').getPublicUrl(file.name);
-      const type = file.name.endsWith('.pdf') ? 'pdf' : file.name.endsWith('.docx') ? 'docx' : 'unknown';
+      const type = file.name.endsWith('.pdf') ? 'pdf' : file.name.endsWith('.docx') ? 'docx' : file.name.endsWith('.jpg') || file.name.endsWith('.png') ? 'image' : 'unknown';
       setMaterials([
         ...materials,
         {
           id: file.name,
-          name: file.name,
+          title: file.name,
           type,
           subject: subjectInput,
           uploadedBy: 'Користувач',
           uploadDate: new Date().toLocaleDateString('uk-UA'),
+          downloads: 0,
           fileSize: `${(file.size / 1024 / 1024).toFixed(1)} MB`,
           url: data.publicUrl,
         },
@@ -124,7 +127,7 @@ const MaterialsPage = () => {
             <input
               type="text"
               placeholder="Пошук матеріалів..."
-              className="block w-full pl-10 pr-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+              className="block w-full pl-10 pr-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
             />
@@ -135,7 +138,7 @@ const MaterialsPage = () => {
                 <Filter className="h-4 w-4 text-gray-400" />
               </div>
               <select
-                className="block w-full pl-10 pr-10 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 appearance-none bg-white"
+                className="block w-full pl-10 pr-10 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 appearance-none bg-white"
                 value={selectedSubject}
                 onChange={(e) => setSelectedSubject(e.target.value)}
               >
@@ -152,11 +155,11 @@ const MaterialsPage = () => {
                 <Filter className="h-4 w-4 text-gray-400" />
               </div>
               <select
-                className="block w-full pl-10 pr-10 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 appearance-none bg-white"
+                className="block w-full pl-10 pr-10 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 appearance-none bg-white"
                 value={selectedType}
                 onChange={(e) => setSelectedType(e.target.value)}
               >
-                <option value="">Всі типи</option>
+                <option value="">Всі типи файлів</option>
                 {fileTypes.map((type) => (
                   <option key={type} value={type}>
                     {type.toUpperCase()}
@@ -174,22 +177,22 @@ const MaterialsPage = () => {
           <table className="min-w-full divide-y divide-gray-200">
             <thead className="bg-gray-50">
               <tr>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                   Назва
                 </th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                   Предмет
                 </th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                   Завантажив
                 </th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                   Дата
                 </th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                   Розмір
                 </th>
-                <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
+                <th scope="col" className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
                   Дії
                 </th>
               </tr>
@@ -201,19 +204,32 @@ const MaterialsPage = () => {
                     <div className="flex items-center">
                       {material.type === 'pdf' && <FileText className="h-5 w-5 text-red-500 mr-2" />}
                       {material.type === 'docx' && <FileText className="h-5 w-5 text-blue-500 mr-2" />}
-                      <a href={material.url} target="_blank" className="text-sm font-medium text-gray-900 hover:underline">
-                        {material.name}
+                      {material.type === 'image' && <FileImage className="h-5 w-5 text-green-500 mr-2" />}
+                      <a
+                        href={material.url}
+                        target="_blank"
+                        className="text-sm font-medium text-gray-900 hover:underline"
+                      >
+                        {material.title}
                       </a>
                     </div>
                   </td>
-                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{material.subject}</td>
-                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{material.uploadedBy}</td>
-                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{material.uploadDate}</td>
-                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{material.fileSize}</td>
+                  <td className="px-6 py-4 whitespace-nowrap">
+                    <div className="text-sm text-gray-900">{material.subject}</div>
+                  </td>
+                  <td className="px-6 py-4 whitespace-nowrap">
+                    <div className="text-sm text-gray-900">{material.uploadedBy}</div>
+                  </td>
+                  <td className="px-6 py-4 whitespace-nowrap">
+                    <div className="text-sm text-gray-500">{material.uploadDate}</div>
+                  </td>
+                  <td className="px-6 py-4 whitespace-nowrap">
+                    <div className="text-sm text-gray-500">{material.fileSize}</div>
+                  </td>
                   <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
                     <a
                       href={material.url}
-                      download={material.name}
+                      download={material.title}
                       className="text-blue-600 hover:text-blue-900 flex items-center space-x-1 ml-auto"
                     >
                       <Download className="h-4 w-4" />
@@ -236,14 +252,14 @@ const MaterialsPage = () => {
       <div className="mt-12 bg-blue-50 rounded-lg shadow-sm p-6">
         <h2 className="text-2xl font-bold text-gray-800 mb-4">Поділіться своїми матеріалами</h2>
         <p className="text-gray-600 mb-6">
-          Допоможіть іншим студентам, завантаживши корисні навчальні матеріали. Підтримуються PDF і Word.
+          Допоможіть іншим студентам, завантаживши корисні навчальні матеріали. Ви можете завантажувати файли у форматі PDF, Word або зображення високої якості.
         </p>
         <div className="border-2 border-dashed border-blue-300 rounded-lg p-8 text-center">
           <Upload className="h-12 w-12 text-blue-500 mx-auto mb-4" />
           <input
             id="fileInput"
             type="file"
-            accept=".pdf,.docx"
+            accept=".pdf,.docx,.jpg,.png"
             className="hidden"
             onChange={(e) => setFile(e.target.files?.[0] || null)}
           />
@@ -254,7 +270,8 @@ const MaterialsPage = () => {
             value={subjectInput}
             onChange={(e) => setSubjectInput(e.target.value)}
           />
-          <p className="text-gray-500 text-sm mb-4">Формати: PDF, DOCX</p>
+          <p className="text-gray-700 mb-2">Перетягніть файли сюди або натисніть, щоб вибрати</p>
+          <p className="text-gray-500 text-sm mb-4">Підтримувані формати: PDF, DOCX, JPG, PNG</p>
           <button
             onClick={handleFileUpload}
             className="bg-blue-700 text-white px-4 py-2 rounded-md hover:bg-blue-800 transition-colors inline-flex items-center space-x-2"
