@@ -32,7 +32,7 @@ const MaterialsPage: React.FC = () => {
 
         const fetchedMaterials = data.map((file) => {
           const { publicUrl } = supabase.storage.from('materials').getPublicUrl(file.name).data;
-          const type = file.name.endsWith('.pdf')
+          const type: 'pdf' | 'docx' | 'image' | 'unknown' = file.name.endsWith('.pdf')
             ? 'pdf'
             : file.name.endsWith('.docx')
             ? 'docx'
@@ -53,9 +53,13 @@ const MaterialsPage: React.FC = () => {
           };
         });
         setMaterials(fetchedMaterials);
-      } catch (err: any) {
+      } catch (err: unknown) {
         console.error('Error fetching materials:', err);
-        setError(`Помилка завантаження матеріалів: ${err.message || 'Невідома помилка'}`);
+        if (err instanceof Error) {
+          setError(`Помилка завантаження матеріалів: ${err.message}`);
+        } else {
+          setError('Помилка завантаження матеріалів: Невідома помилка');
+        }
       }
     };
 
@@ -116,9 +120,13 @@ const MaterialsPage: React.FC = () => {
       ]);
       setFile(null);
       setSubjectInput('');
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error('Upload error:', err);
-      setError(`Помилка завантаження: ${err.message || 'Невідома помилка'}`);
+      if (err instanceof Error) {
+        setError(`Помилка завантаження: ${err.message}`);
+      } else {
+        setError('Помилка завантаження: Невідома помилка');
+      }
     }
   };
 
