@@ -1,111 +1,130 @@
 import React, { useState, useEffect } from 'react';
 import { Search, Upload, FileText, FileImage, Download, Filter } from 'lucide-react';
-import { supabase } from '../lib/supabase'; // Клієнт Supabase
+import { supabase } from '../lib/supabase';
 
+// Інтерфейс для матеріалів
 interface Material {
   id: string;
-  title: string;
-  type: string;
+  name: string;
+  type: 'pdf' | 'docx' | 'image' | 'unknown';
   subject: string;
   uploadedBy: string;
   uploadDate: string;
-  downloads: number;
   fileSize: string;
   url: string;
 }
 
-const MaterialsPage = () => {
+const MaterialsPage: React.FC = () => {
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedSubject, setSelectedSubject] = useState('');
   const [selectedType, setSelectedType] = useState('');
   const [materials, setMaterials] = useState<Material[]>([]);
   const [file, setFile] = useState<File | null>(null);
   const [subjectInput, setSubjectInput] = useState('');
+  const [error, setError] = useState<string | null>(null);
 
   // Завантаження списку файлів із Supabase
   useEffect(() => {
-    async function fetchMaterials() {
-      const { data, error } = await supabase.storage.from('materials').list('', { limit: 100 });
-      if (error) {
-        console.error('Error fetching materials:', error);
-        return;
-      }
+    const fetchMaterials = async () => {
+      try {
+        const { data, error } = await supabase.storage.from('materials').list('', { limit: 100 });
+        if (error) throw error;
 
-      const fetchedMaterials = await Promise.all(
-        data.map(async (file) => {
-          const { data: urlData } = supabase.storage.from('materials').getPublicUrl(file.name);
-          const type = file.name.endsWith('.pdf') ? 'pdf' : file.name.endsWith('.docx') ? 'docx' : file.name.endsWith('.jpg') || file.name.endsWith('.png') ? 'image' : 'unknown';
+        const fetchedMaterials = data.map((file) => {
+          const { publicUrl } = supabase.storage.from('materials').getPublicUrl(file.name).data;
+          const type = file.name.endsWith('.pdf')
+            ? 'pdf'
+            : file.name.endsWith('.docx')
+            ? 'docx'
+            : file.name.endsWith('.jpg') || file.name.endsWith('.png')
+            ? 'image'
+            : 'unknown';
           return {
-            id: file.id || file.name,
-            title: file.name,
+            id: file.name,
+            name: file.name,
             type,
             subject: file.metadata?.subject || 'Без предмету',
             uploadedBy: file.metadata?.uploadedBy || 'Анонім',
-            uploadDate: new Date(file.created_at).toLocaleDateString('uk-UA'),
-            downloads: file.metadata?.downloads || 0,
-            fileSize: `${(file.metadata?.size / 1024 / 1024).toFixed(1)} MB`,
-            url: urlData.publicUrl,
+            uploadDate: new Date(file.created_at || Date.now()).toLocaleDateString('uk-UA'),
+            fileSize: file.metadata?.size
+              ? `${(file.metadata.size / 1024 / 1024).toFixed(1)} MB`
+              : 'Невідомо',
+            url: publicUrl,
           };
-        })
-      );
-      setMaterials(fetchedMaterials);
-    }
+        });
+        setMaterials(fetchedMaterials);
+      } catch (err: any) {
+        console.error('Error fetching materials:', err);
+        setError(`Помилка завантаження матеріалів: ${err.message || 'Невідома помилка'}`);
+      }
+    };
+
     fetchMaterials();
   }, []);
 
   // Фільтрація матеріалів
   const filteredMaterials = materials.filter((material) => {
     const matchesSearch =
-      material.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      material.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
       material.subject.toLowerCase().includes(searchTerm.toLowerCase());
-    const matchesSubject = selectedSubject === '' || material.subject === selectedSubject;
-    const matchesType = selectedType === '' || material.type === selectedType;
+    const matchesSubject = !selectedSubject || material.subject === selectedSubject;
+    const matchesType = !selectedType || material.type === selectedType;
     return matchesSearch && matchesSubject && matchesType;
   });
 
-  const subjects = [...new Set(materials.map((material) => material.subject))];
-  const fileTypes = [...new Set(materials.map((material) => material.type))];
+  const subjects = [...new Set(materials.map((m) => m.subject))];
+  const fileTypes = [...new Set(materials.map((m) => m.type))];
 
   // Завантаження файлу
   const handleFileUpload = async () => {
     if (!file || !subjectInput) {
-      alert('Виберіть файл і вкажіть предмет!');
+      setError('Будь ласка, виберіть файл і вкажіть предмет.');
       return;
     }
 
-    const { error } = await supabase.storage.from('materials').upload(file.name, file, {
-      upsert: true,
-      contentType: file.type,
-      metadata: { subject: subjectInput, uploadedBy: 'Користувач', downloads: 0 },
-    });
+    setError(null); // Скидаємо попередні помилки
+    try {
+      const { error } = await supabase.storage.from('materials').upload(file.name, file, {
+        upsert: true,
+        contentType: file.type,
+        metadata: { subject: subjectInput, uploadedBy: 'Користувач' },
+      });
 
-    if (error) {
-      console.error('Upload error:', error);
-      alert(`Помилка завантаження: ${error.message}`);
-    } else {
-      const { data } = supabase.storage.from('materials').getPublicUrl(file.name);
-      const type = file.name.endsWith('.pdf') ? 'pdf' : file.name.endsWith('.docx') ? 'docx' : file.name.endsWith('.jpg') || file.name.endsWith('.png') ? 'image' : 'unknown';
-      setMaterials([
-        ...materials,
+      if (error) throw error;
+
+      const { publicUrl } = supabase.storage.from('materials').getPublicUrl(file.name).data;
+      const type = file.name.endsWith('.pdf')
+        ? 'pdf'
+        : file.name.endsWith('.docx')
+        ? 'docx'
+        : file.name.endsWith('.jpg') || file.name.endsWith('.png')
+        ? 'image'
+        : 'unknown';
+
+      setMaterials((prev) => [
+        ...prev,
         {
           id: file.name,
-          title: file.name,
+          name: file.name,
           type,
           subject: subjectInput,
           uploadedBy: 'Користувач',
           uploadDate: new Date().toLocaleDateString('uk-UA'),
-          downloads: 0,
           fileSize: `${(file.size / 1024 / 1024).toFixed(1)} MB`,
-          url: data.publicUrl,
+          url: publicUrl,
         },
       ]);
       setFile(null);
       setSubjectInput('');
+    } catch (err: any) {
+      console.error('Upload error:', err);
+      setError(`Помилка завантаження: ${err.message || 'Невідома помилка'}`);
     }
   };
 
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-10">
+      {/* Заголовок і кнопка завантаження */}
       <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-8">
         <h1 className="text-3xl font-bold text-gray-800 mb-4 md:mb-0">Навчальні матеріали</h1>
         <button
@@ -171,28 +190,35 @@ const MaterialsPage = () => {
         </div>
       </div>
 
+      {/* Повідомлення про помилку */}
+      {error && (
+        <div className="bg-red-100 border-l-4 border-red-500 text-red-700 p-4 mb-8 rounded">
+          {error}
+        </div>
+      )}
+
       {/* Список матеріалів */}
       <div className="bg-white rounded-lg shadow-md overflow-hidden">
         <div className="overflow-x-auto">
           <table className="min-w-full divide-y divide-gray-200">
             <thead className="bg-gray-50">
               <tr>
-                <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                   Назва
                 </th>
-                <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                   Предмет
                 </th>
-                <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                   Завантажив
                 </th>
-                <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                   Дата
                 </th>
-                <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                   Розмір
                 </th>
-                <th scope="col" className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
+                <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
                   Дії
                 </th>
               </tr>
@@ -208,28 +234,21 @@ const MaterialsPage = () => {
                       <a
                         href={material.url}
                         target="_blank"
+                        rel="noopener noreferrer"
                         className="text-sm font-medium text-gray-900 hover:underline"
                       >
-                        {material.title}
+                        {material.name}
                       </a>
                     </div>
                   </td>
-                  <td className="px-6 py-4 whitespace-nowrap">
-                    <div className="text-sm text-gray-900">{material.subject}</div>
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap">
-                    <div className="text-sm text-gray-900">{material.uploadedBy}</div>
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap">
-                    <div className="text-sm text-gray-500">{material.uploadDate}</div>
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap">
-                    <div className="text-sm text-gray-500">{material.fileSize}</div>
-                  </td>
+                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{material.subject}</td>
+                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{material.uploadedBy}</td>
+                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{material.uploadDate}</td>
+                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{material.fileSize}</td>
                   <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
                     <a
                       href={material.url}
-                      download={material.title}
+                      download={material.name}
                       className="text-blue-600 hover:text-blue-900 flex items-center space-x-1 ml-auto"
                     >
                       <Download className="h-4 w-4" />
@@ -241,7 +260,7 @@ const MaterialsPage = () => {
             </tbody>
           </table>
         </div>
-        {filteredMaterials.length === 0 && (
+        {filteredMaterials.length === 0 && !error && (
           <div className="text-center py-10">
             <p className="text-gray-500">Матеріалів не знайдено. Спробуйте змінити параметри пошуку.</p>
           </div>
@@ -252,7 +271,7 @@ const MaterialsPage = () => {
       <div className="mt-12 bg-blue-50 rounded-lg shadow-sm p-6">
         <h2 className="text-2xl font-bold text-gray-800 mb-4">Поділіться своїми матеріалами</h2>
         <p className="text-gray-600 mb-6">
-          Допоможіть іншим студентам, завантаживши корисні навчальні матеріали. Ви можете завантажувати файли у форматі PDF, Word або зображення високої якості.
+          Завантажуйте корисні навчальні матеріали для інших студентів. Підтримуються PDF, Word, JPG, PNG.
         </p>
         <div className="border-2 border-dashed border-blue-300 rounded-lg p-8 text-center">
           <Upload className="h-12 w-12 text-blue-500 mx-auto mb-4" />
@@ -270,8 +289,8 @@ const MaterialsPage = () => {
             value={subjectInput}
             onChange={(e) => setSubjectInput(e.target.value)}
           />
-          <p className="text-gray-700 mb-2">Перетягніть файли сюди або натисніть, щоб вибрати</p>
-          <p className="text-gray-500 text-sm mb-4">Підтримувані формати: PDF, DOCX, JPG, PNG</p>
+          <p className="text-gray-700 mb-2">Перетягніть файли сюди або виберіть через кнопку</p>
+          <p className="text-gray-500 text-sm mb-4">Формати: PDF, DOCX, JPG, PNG</p>
           <button
             onClick={handleFileUpload}
             className="bg-blue-700 text-white px-4 py-2 rounded-md hover:bg-blue-800 transition-colors inline-flex items-center space-x-2"
